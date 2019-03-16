@@ -14,7 +14,7 @@ class DataBase:
         self.file_room_init = "room_init.sql"
         self.secret = "This program is owned by Lance."
 
-        self.error_preview = "发生错误："
+        self.error_preview = "错误："
         self.success = 'Success.'
 
         self.error = {
@@ -23,6 +23,7 @@ class DataBase:
             "Auth": "%s Auth 错误，请重新登录。" % self.error_preview,
             "Password": "%s 密码错误。" % self.error_preview,
             "NoUser": "%s 没有这个用户。" % self.error_preview,
+            "UserExist": "%s 此用户已存在。" % self.error_preview,
         }
         self.errors = {
             "Success": str(0),
@@ -30,13 +31,15 @@ class DataBase:
             "Auth": str(2),
             "Password": str(7),
             "NoUser": str(9),
+            "UserExist": str(10)
         }
         self.error_messages = {
             str(0): self.error["Success"],
             str(1): self.error["Error"],
             str(2): self.error["Auth"],
             str(7): self.error["Password"],
-            str(9): self.error["NoUser"]
+            str(9): self.error["NoUser"],
+            str(10): self.error["UserExist"]
         }
         self.tables = ['users', 'files']
 
@@ -64,7 +67,7 @@ class DataBase:
 
     def make_result(self, code, **args):
         result = {
-            "code": str(code),
+            "code": int(code),
             "message": self.error_messages[str(code)],
             "data": args
         }
@@ -171,6 +174,15 @@ class DataBase:
         self.cursor_finish(cursor)
         return username
 
+    def user_exist(self, username):
+        cursor = self.cursor_get()
+        cursor.execute(self.v("SELECT username FROM users WHERE username = %s"), (username, ))
+        data = cursor.fetchall()
+        self.cursor_finish(cursor)
+        if len(data) > 0:
+            return True
+        return False
+
     def user_set_info(self, auth, email: str = None):
         if self.check_auth(auth) is False:
             return self.make_result(self.errors["Auth"])
@@ -180,6 +192,19 @@ class DataBase:
             cursor.execute(self.v("UPDATE users SET email = %s WHERE username = %s"), (email, username))
         self.cursor_finish(cursor)
         return self.make_result(0)
+
+    def user_get_info(self, username):
+        if not self.user_exist(username):
+            return self.make_result(self.errors['NoUser'])
+        cursor = self.cursor_get()
+        cursor.execute(self.v("SELECT username, email, created_at, blog_title, blog_url WHERE username = %s"),
+                       (username, ))
+        data = cursor.fetchall()[0]
+        self.cursor_finish(cursor)
+        return self.make_result(0, user_info={
+            'username': data[0], 'email': data[1], 'created_at': data[2], 'blog_title': data[3],
+            'blog_url': data[4]
+        })
 
     def file_upload(self, auth, filename: str = 'FILE', url: str = '', filesize: int=0):
         if self.check_auth(auth) is False:
@@ -216,8 +241,8 @@ def jsonify(string: str):
 if __name__ == '__main__':
     db = DataBase()
     db.db_init()
-    db.create_user(username='', password='')
-    _au = db.create_auth(username='', password='')
+    db.create_user(username='Lance', password='')
+    _au = db.create_auth(username='Lance', password='')
     print(_au)
     _au = jsonify(_au)['data']['auth']['auth']
 

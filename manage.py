@@ -2,6 +2,10 @@ import base64
 import hashlib
 # import json
 import os
+from io import BytesIO
+import zipfile
+import shutil
+import time
 
 import requests
 from flask import *
@@ -46,11 +50,14 @@ def index():
         res = res + '\n\n##### End of files.\n'
         return res
     """
-    return \
-        "<title>Chat 2 Server</title>" \
-        "<h1>It is a server for Chat 2! <br>@LanceLiang2018</h1><br>" \
-        "<a href=\"http://github.com/LanceLiang2018/ChatRoom2/\">About (Server)</a><br>" \
-        "<a href=\"http://github.com/LanceLiang2018/Chat2-Android/\">About (Client)</a>"
+    with open('about.html', 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+def get_if_in(key: str, form: dict, default=None):
+    if key in form:
+        return form[key]
+    return default
 
 
 @app.route('/v1/api/clear_all', methods=["POST", "GET"])
@@ -83,26 +90,44 @@ def main_api():
 
     # print("Action...")
 
-    # 这三个api不需要auth
+    # 不需要auth
     if action == 'clear_all':
-        # 访问/v3/api/clear_all
-        pass
+        # 访问/v1/api/clear_all
+        return redirect('/v1/api/clear_all')
+
+    if action == 'publish':
+        if 'zipfile' not in request.files:
+            return db.make_result(1)
+        f = request.files['zipfile']
+        try:
+            z = zipfile.ZipFile(BytesIO(f.read()))
+            # print(z.namelist())
+            if os.path.exists('tmp'):
+                shutil.rmtree('tmp')
+            os.mkdir('tmp')
+            z.extractall('tmp/')
+            z.close()
+            print('Doing Jekyll...')
+            result = BytesIO()
+            if os.system("jekyll build") == 0:
+                z = zipfile.ZipFile(result, 'w')
+                # _site
+                for current_path, subfolders, filesname in os.walk('tmp/_site'):
+                    # print(current_path, subfolders, filesname)
+                    #  filesname是一个列表，我们需要里面的每个文件名和当前路径组合
+                    for file in filesname:
+                        # 将当前路径与当前路径下的文件名组合，就是当前文件的绝对路径
+                        z.write(os.path.join(current_path, file))
+                # 关闭资源
+                z.close()
+
+        except Exception as e:
+            return db.make_result(1, error=str(e))
+        return result.getvalue()
 
     if action == "get_version":
-        ver = requests.get("https://raw.githubusercontent.com/LanceLiang2018/Chat2-Android/master/ver").text
+        ver = requests.get("https://raw.githubusercontent.com/LanceLiang2018/LBlogs/master/version").text
         return db.make_result(0, version=ver)
-
-    if action == 'get_user':
-        if 'username' not in form:
-            return db.make_result(1, error=form)
-        username = get_if_in('username', form, default='Lance')
-        return db.user_get_info(username=username)
-
-    if action == 'get_room':
-        if 'gid' not in form:
-            return db.make_result(1, error=form)
-        gid = int(get_if_in('gid', form, default='0'))
-        return db.room_get_info(gid=gid, auth='')
 
     if action == 'login':
         if 'username' not in form \
@@ -118,9 +143,14 @@ def main_api():
             return db.make_result(1, error=form)
         username = get_if_in('username', form)
         password = get_if_in('password', form)
-        user_type = get_if_in('user_type', form, default='normal')
         email = get_if_in('email', form, default='')
-        return db.create_user(username=username, password=password, email=email, user_type=user_type)
+        return db.create_user(username=username, password=password, email=email)
+
+    if action == 'get_user':
+        if 'username' not in form:
+            return db.make_result(1, error=form)
+        username = get_if_in('username', form)
+        return db.user_get_info(username)
 
     # 需要auth
     if 'auth' not in form:
@@ -133,36 +163,6 @@ def main_api():
         if db.check_auth(auth) is False:
             return db.make_result(2)
         return db.make_result(0)
-
-    if action == 'create_room':
-        name = get_if_in('name', form, default='New group')
-        room_type = get_if_in('room_type', form, default='public')
-        if db.check_auth(auth) is False:
-            return db.make_result(2)
-        gid = db.create_room(auth=auth, name=name, room_type=room_type)
-        return db.room_get_info(auth=auth, gid=gid)
-
-    if action == 'get_room_all':
-        # print("Your request:", form)
-        return db.room_get_all(auth=auth)
-
-    if action == 'join_in':
-        if 'gid' not in form:
-            return db.make_result(1, error=form)
-        gid = int(get_if_in('gid', form, default="0"))
-        return db.room_join_in(auth=auth, gid=gid)
-
-    if action == 'set_room':
-        if 'gid' not in form:
-            return db.make_result(1, error=form)
-        gid = int(get_if_in('gid', form, default=None))
-        name = get_if_in('name', form, default=None)
-        head = get_if_in('head', form, default=None)
-        return db.room_set_info(auth=auth, gid=gid, name=name, head=head)
-
-    # New Action
-    if action == 'pre_upload':
-        return db.make_result(0, pre_upload={'pre_url': 'https://%s.cos.ap-chengdu.myqcloud.com/' % bucket})
 
     if action == 'upload':
         if 'data' not in form:
@@ -181,7 +181,7 @@ def main_api():
             StorageClass='STANDARD',
             EnableMD5=False
             # 我自己算吧......
-        #     不算了
+            # 不算了
         )
         print(response)
         # url = 'https://%s.cos.ap-chengdu.myqcloud.com/%s' % (bucket, filename_md5)
@@ -195,65 +195,11 @@ def main_api():
         return res
 
     if action == 'get_files':
-        limit = int(get_if_in('limit', form, default='30'))
-        offset = int(get_if_in('limit', form, default='0'))
-        return db.file_get(auth=auth, limit=limit, offset=offset)
-
-    if action == 'get_messages':
-        if db.check_auth(auth) is False:
-            return db.make_result(2)
-        gid = int(get_if_in('gid', form, default='0'))
-        limit = int(get_if_in('limit', form, default='30'))
-        since = int(get_if_in('since', form, default='0'))
-        req = get_if_in('request', form, default='all')
-        # print("req: ", req)
-
-        if req == 'all' and gid == 0:
-            print("req: all")
-            gids = db.room_get_gids(auth=auth, req='all')
-            messages = []
-            for g in gids:
-                result = json.loads(db.get_new_message(auth=auth, gid=g, limit=limit, since=since))
-                if result['code'] != 0:
-                    return jsonify(result)
-                messages.extend(result['data']['message'])
-            return db.make_result(0, message=messages)
-        elif req == 'private':
-            print("req: private")
-            gids = db.room_get_gids(auth=auth, req='private')
-            messages = []
-            for g in gids:
-                result = json.loads(db.get_new_message(auth=auth, gid=g, limit=limit, since=since))
-                if result['code'] != 0:
-                    return jsonify(result)
-                messages.extend(result['data']['message'])
-            print('private:', messages)
-            return db.make_result(0, message=messages)
-        elif gid != 0:
-            print("req: single room...")
-            return db.get_new_message(auth=auth, gid=gid, limit=limit, since=since)
-        return db.make_result(1)
-
-    if action == 'send_message':
-        if 'gid' not in form \
-                or 'text' not in form:
-            return db.make_result(1, error=form)
-        gid = int(get_if_in('gid', form, default='0'))
-        text = get_if_in('text', form, default='text')
-        message_type = get_if_in('message_type', form, default='text')
-        return db.send_message(auth=auth, gid=gid, text=text, message_type=message_type)
-
-    if action == 'make_friends':
-        if 'friend' not in form:
-            return db.make_result(1, error=form)
-        friend = get_if_in('friend', form, default='Lance')
-        return db.make_friends(auth=auth, friend=friend)
+        return db.file_get(auth=auth)
 
     if action == "set_user":
-        head = get_if_in('head', form, default=None)
-        motto = get_if_in('motto', form, default=None)
         email = get_if_in("email", form, default=None)
-        return db.user_set_info(auth=auth, head=head, motto=motto, email=email)
+        return db.user_set_info(auth=auth, email=email)
 
     return db.make_result(1, error='Not support method')
 

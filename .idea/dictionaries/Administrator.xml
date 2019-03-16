@@ -3,8 +3,10 @@
     <words>
       <w>blogs</w>
       <w>filesize</w>
+      <w>filesname</w>
       <w>jsonify</w>
       <w>postgre</w>
+      <w>subfolders</w>
       <w>uptime</w>
     </words>
   </dictionary>
