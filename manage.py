@@ -16,12 +16,12 @@ from database import DataBase
 
 secret_id = 'AKIDcq7HVrj0nlAWUYvPoslyMKKI2GNJ478z'
 secret_key = '70xZrtGAwmf6WdXGhcch3gRt7hV4SJGx'
-region = 'ap-chengdu'
+region = 'ap-guangzhou'
 config = CosConfig(Region=region, SecretId=secret_id, SecretKey=secret_key)
 # 2. 获取客户端对象
 client = CosS3Client(config)
 
-bucket = 'chatroom-1254016670'
+bucket = 'lblogs-1254016670'
 
 app = Flask(__name__)
 
@@ -95,41 +95,6 @@ def main_api():
         # 访问/v1/api/clear_all
         return redirect('/v1/api/clear_all')
 
-    if action == 'publish':
-        if 'zipfile' not in request.files:
-            return db.make_result(1)
-        f = request.files['zipfile']
-        try:
-            z = zipfile.ZipFile(BytesIO(f.read()))
-            # print(z.namelist())
-            if os.path.exists('tmp'):
-                shutil.rmtree('tmp')
-            os.mkdir('tmp')
-            z.extractall('tmp/')
-            z.close()
-            os.chdir('tmp')
-            print('Doing Jekyll...')
-            result = BytesIO()
-            if os.system("jekyll build") == 0:
-                # time.sleep(1)
-                os.chdir("_site")
-                z = zipfile.ZipFile(result, 'w')
-                # _site
-                for current_path, subfolders, filesname in os.walk('.'):
-                    # print(current_path, subfolders, filesname)
-                    #  filesname是一个列表，我们需要里面的每个文件名和当前路径组合
-                    for file in filesname:
-                        # 将当前路径与当前路径下的文件名组合，就是当前文件的绝对路径
-                        z.write(os.path.join(current_path, file))
-                        print("ADD file:", os.path.join(current_path, file))
-                # 关闭资源
-                z.close()
-            os.chdir('../..')
-
-        except Exception as e:
-            return db.make_result(1, error=str(e))
-        return result.getvalue()
-
     if action == "get_version":
         ver = requests.get("https://raw.githubusercontent.com/LanceLiang2018/LBlogs/master/version").text
         return db.make_result(0, version=ver)
@@ -198,6 +163,66 @@ def main_api():
         db.file_upload(auth, filename, url)
         res = db.make_result(0, upload_result=result)
         return res
+
+    if action == 'publish':
+        if 'zipfile' not in request.files:
+            return db.make_result(1)
+        f = request.files['zipfile']
+        username = db.auth2username(auth)
+
+        try:
+            z = zipfile.ZipFile(BytesIO(f.read()))
+            # print(z.namelist())
+            if os.path.exists('tmp'):
+                shutil.rmtree('tmp')
+            os.mkdir('tmp')
+            z.extractall('tmp/')
+            z.close()
+            os.chdir('tmp')
+            print('Doing Jekyll...')
+            result = BytesIO()
+            if os.system("echo jekyll build") == 0:
+                # time.sleep(1)
+                os.chdir("_site")
+                z = zipfile.ZipFile(result, 'w')
+                # _site
+                for current_path, subfolders, filesname in os.walk('.'):
+                    # print(current_path, subfolders, filesname)
+                    #  filesname是一个列表，我们需要里面的每个文件名和当前路径组合
+                    for file in filesname:
+                        # 将当前路径与当前路径下的文件名组合，就是当前文件的绝对路径
+                        filepath = os.path.join(current_path, file)
+                        filepath = filepath.replace('\\', '/')
+                        filepath = filepath.split('./')[-1]
+                        z.write(filepath)
+                        print("ADD file:", filepath)
+                        with open(os.path.join(current_path, file), 'rb') as f:
+                            response = client.put_object(
+                                Bucket=bucket,
+                                Body=f.read(),
+                                # Key="%s/%s" % (username, filepath),
+                                Key="%s" % (filepath, ),
+                                StorageClass='STANDARD',
+                                EnableMD5=False
+                            )
+                            print("Upload %s..." % filepath, response)
+                # 关闭资源
+                z.close()
+            os.chdir('../..')
+
+            response = client.put_object(
+                Bucket=bucket,
+                Body=result,
+                # Key=filename_md5,
+                Key="%s/%s" % (username, 'raw.zip'),
+                StorageClass='STANDARD',
+                EnableMD5=False
+            )
+            print("Upload raw.zip...", response)
+
+        except Exception as e:
+            return db.make_result(1, error=str(e))
+        return db.make_result(0)
 
     if action == 'get_files':
         return db.file_get(auth=auth)
