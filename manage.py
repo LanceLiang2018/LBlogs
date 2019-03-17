@@ -111,17 +111,20 @@ def main_api():
             print('Doing Jekyll...')
             result = BytesIO()
             if os.system("jekyll build") == 0:
+                # time.sleep(1)
+                os.chdir("_site")
                 z = zipfile.ZipFile(result, 'w')
                 # _site
-                for current_path, subfolders, filesname in os.walk('tmp/_site'):
+                for current_path, subfolders, filesname in os.walk('.'):
                     # print(current_path, subfolders, filesname)
                     #  filesname是一个列表，我们需要里面的每个文件名和当前路径组合
                     for file in filesname:
                         # 将当前路径与当前路径下的文件名组合，就是当前文件的绝对路径
                         z.write(os.path.join(current_path, file))
+                        print("ADD file:", os.path.join(current_path, file))
                 # 关闭资源
                 z.close()
-            os.chdir('..')
+            os.chdir('../..')
 
         except Exception as e:
             return db.make_result(1, error=str(e))
