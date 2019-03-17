@@ -107,6 +107,7 @@ def main_api():
             os.mkdir('tmp')
             z.extractall('tmp/')
             z.close()
+            os.chdir('tmp')
             print('Doing Jekyll...')
             result = BytesIO()
             if os.system("jekyll build") == 0:
@@ -120,6 +121,7 @@ def main_api():
                         z.write(os.path.join(current_path, file))
                 # 关闭资源
                 z.close()
+            os.chdir('..')
 
         except Exception as e:
             return db.make_result(1, error=str(e))
