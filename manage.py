@@ -181,7 +181,7 @@ def main_api():
             os.chdir('tmp')
             print('Doing Jekyll...')
             result = BytesIO()
-            if os.system("echo jekyll build") == 0:
+            if os.system("jekyll build") == 0:
                 # time.sleep(1)
                 os.chdir("_site")
                 z = zipfile.ZipFile(result, 'w')
