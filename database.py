@@ -160,10 +160,17 @@ class DataBase:
         return self.make_result(0, auth={'auth': auth})
 
     def check_auth(self, auth):
+        if len(auth) > 32:
+            return self.check_token(auth)
         result = self.check_in("users", "auth", auth)
         if result is True:
             return True
         return False
+
+    # Token 格式： %auth%%utc%
+    def check_token(self, token):
+        auth = token[:32]
+        utc = int(token[32:], 16)
 
     def auth2username(self, auth):
         if self.check_auth(auth) is False:
