@@ -6,6 +6,7 @@ from io import BytesIO
 import zipfile
 import shutil
 import time
+import threading
 
 import requests
 from flask import *
@@ -77,6 +78,19 @@ def update():
 @app.route('/license', methods=["GET"])
 def license_help():
     return redirect("https://static-1254016670.cos.ap-chengdu.myqcloud.com/license.html")
+
+
+def do_upload(filename: str):
+    with open(filename, 'rb') as f:
+        response = client.put_object(
+            Bucket=bucket,
+            Body=f.read(),
+            # Key="%s/%s" % (username, filepath),
+            Key="%s" % (filename, ),
+            StorageClass='STANDARD',
+            EnableMD5=False
+        )
+        print("Upload %s..." % filename, response)
 
 
 @app.route('/v1/api', methods=["POST"])
@@ -181,11 +195,14 @@ def main_api():
             os.chdir('tmp')
             print('Doing Jekyll...')
             result = BytesIO()
+            ths = []
+
             if os.system("jekyll build") == 0:
                 # time.sleep(1)
                 os.chdir("_site")
                 z = zipfile.ZipFile(result, 'w')
                 # _site
+
                 for current_path, subfolders, filesname in os.walk('.'):
                     # print(current_path, subfolders, filesname)
                     #  filesname是一个列表，我们需要里面的每个文件名和当前路径组合
@@ -196,19 +213,28 @@ def main_api():
                         filepath = filepath.split('./')[-1]
                         z.write(filepath)
                         print("ADD file:", filepath)
-                        with open(os.path.join(current_path, file), 'rb') as f:
-                            response = client.put_object(
-                                Bucket=bucket,
-                                Body=f.read(),
-                                # Key="%s/%s" % (username, filepath),
-                                Key="%s" % (filepath, ),
-                                StorageClass='STANDARD',
-                                EnableMD5=False
-                            )
-                            print("Upload %s..." % filepath, response)
+
+                        t = threading.Thread(target=do_upload, args=(filepath, ))
+                        ths.append(t)
+
+                        # with open(os.path.join(current_path, file), 'rb') as f:
+                        #     response = client.put_object(
+                        #         Bucket=bucket,
+                        #         Body=f.read(),
+                        #         # Key="%s/%s" % (username, filepath),
+                        #         Key="%s" % (filepath, ),
+                        #         StorageClass='STANDARD',
+                        #         EnableMD5=False
+                        #     )
+                        #     print("Upload %s..." % filepath, response)
                 # 关闭资源
                 z.close()
             os.chdir('../..')
+
+            for t in ths:
+                t.start()
+            for t in ths:
+                t.join()
 
             response = client.put_object(
                 Bucket=bucket,
