@@ -81,7 +81,7 @@ def license_help():
 
 
 def do_upload(filename: str):
-    with open(filename, 'rb') as f:
+    with open("tmp/_site/%s" % filename, 'rb') as f:
         response = client.put_object(
             Bucket=bucket,
             Body=f.read(),
