@@ -81,11 +81,16 @@ def license_help():
 
 
 def do_upload(filename: str, username: str):
+    if username != '':
+        key = "%s/%s" % (username, filename)
+    else:
+        key = "%s" % (filename, )
+
     with open("tmp/_site/%s" % filename, 'rb') as f:
         response = client.put_object(
             Bucket=bucket,
             Body=f.read(),
-            Key="%s/%s" % (username, filename),
+            Key=key,
             # Key="%s" % (filename, ),
             StorageClass='STANDARD',
             EnableMD5=False
@@ -236,11 +241,16 @@ def main_api():
             for t in ths:
                 t.join()
 
+            if username != '':
+                key = "%s/%s" % (username, 'raw.zip')
+            else:
+                key = "%s" % ('raw.zip', )
+
             response = client.put_object(
                 Bucket=bucket,
                 Body=result,
                 # Key=filename_md5,
-                Key="%s/%s" % (username, 'raw.zip'),
+                Key=key,
                 StorageClass='STANDARD',
                 EnableMD5=False
             )
