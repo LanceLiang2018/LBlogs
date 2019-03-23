@@ -80,13 +80,13 @@ def license_help():
     return redirect("https://static-1254016670.cos.ap-chengdu.myqcloud.com/license.html")
 
 
-def do_upload(filename: str):
+def do_upload(filename: str, username: str):
     with open("tmp/_site/%s" % filename, 'rb') as f:
         response = client.put_object(
             Bucket=bucket,
             Body=f.read(),
-            # Key="%s/%s" % (username, filepath),
-            Key="%s" % (filename, ),
+            Key="%s/%s" % (username, filename),
+            # Key="%s" % (filename, ),
             StorageClass='STANDARD',
             EnableMD5=False
         )
@@ -137,14 +137,14 @@ def main_api():
         return db.user_get_info(username)
 
     # 需要auth
-    if 'auth' not in form:
-        return db.make_result(1, error="No auth")
-    auth = form['auth']
+    if 'token' not in form:
+        return db.make_result(1, error="No token")
+    token = form['token']
 
     # print("Auth...")
 
     if action == 'beat':
-        if db.check_auth(auth) is False:
+        if db.check_auth(token) is False:
             return db.make_result(2)
         return db.make_result(0)
 
@@ -154,7 +154,7 @@ def main_api():
         filename = get_if_in('filename', form, default='filename')
         data = get_if_in('data', form, default=None)
         data = base64.b64decode(data)
-        username = db.auth2username(auth)
+        username = db.token2username(token)
         # md5 = hashlib.md5(data).hexdigest()
         # filename_md5 = "%s" % md5
         response = client.put_object(
@@ -174,7 +174,7 @@ def main_api():
             'filename': filename, 'etag': response['ETag'][1:-1],
             "url": url
         }
-        db.file_upload(auth, filename, url)
+        db.file_upload(token, filename, url)
         res = db.make_result(0, upload_result=result)
         return res
 
@@ -182,7 +182,7 @@ def main_api():
         if 'zipfile' not in request.files:
             return db.make_result(1)
         f = request.files['zipfile']
-        username = db.auth2username(auth)
+        username = db.token2username(token)
 
         try:
             z = zipfile.ZipFile(BytesIO(f.read()))
@@ -214,7 +214,7 @@ def main_api():
                         z.write(filepath)
                         print("ADD file:", filepath)
 
-                        t = threading.Thread(target=do_upload, args=(filepath, ))
+                        t = threading.Thread(target=do_upload, args=(filepath, username))
                         ths.append(t)
 
                         # with open(os.path.join(current_path, file), 'rb') as f:
@@ -251,11 +251,11 @@ def main_api():
         return db.make_result(0)
 
     if action == 'get_files':
-        return db.file_get(auth=auth)
+        return db.file_get(token=token)
 
     if action == "set_user":
         email = get_if_in("email", form, default=None)
-        return db.user_set_info(auth=auth, email=email)
+        return db.user_set_info(token=token, email=email)
 
     return db.make_result(1, error='Not support method')
 

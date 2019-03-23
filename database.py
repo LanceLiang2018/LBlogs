@@ -2,6 +2,7 @@ import hashlib
 import json
 import time
 import sqlite3 as sql
+import random
 
 
 def get_head(email):
@@ -146,20 +147,59 @@ class DataBase:
             return True
         return False
 
-    # 创建鉴权避免麻烦。鉴权格式：MD5(username, secret, time)
+    # 创建鉴权避免麻烦。鉴权(auth)格式：MD5(username, secret, time)
+    # UPDATE: 新的LoginToken: auth_mix(32) + order(32) + noise(4) = (68)
+    # 返回login_token
     def create_auth(self, username, password):
         cursor = self.cursor_get()
         if not self.user_check(username, password):
             return self.make_result(self.errors["Password"])
         string = "%s %s %s" % (username, self.secret, str(time.time()))
         auth = hashlib.md5(string.encode()).hexdigest()
+        # 获取token的时候不需要pre_auth。使用随机数。
+        # pre_auth = auth[:4]
+        pre_auth = "%04x" % random.randint(0, 1 << 16)
+        auth_li = []
+        for i in range(0, len(auth), 2):
+            auth_li.append(auth[i:i+2])
 
-        cursor.execute(self.v("UPDATE users SET auth = %s WHERE username = %s"), (auth, username))
+        # 生成order
+        order = random.sample(range(0, 256), 16)
+        # 数字→排列
+        orderd = []
+        for i in range(len(order)):
+            # orderd.append({order[i]: i})
+            orderd.append({'num': order[i], 'key': i})
+        orderd.sort(key=lambda x: x['num'])
+
+        new_orderd = ['00', ] * 16
+        index = 0
+        for k in orderd:
+            # 这里取反了一次
+            new_orderd[k['key']] = "%02x" % (0xff - int(auth_li[index], 16))
+            index = index + 1
+
+        auth_mix = ''
+        for i in new_orderd:
+            auth_mix = auth_mix + i
+
+        result = '%s' % auth_mix
+        for i in order:
+            result = "%s%s" % (result, "%02x" % i)
+
+        login_token = result + pre_auth
+
+        # 这里才需要pre_auth
+        cursor.execute(self.v("UPDATE users SET auth = %s, pre_auth = %s WHERE username = %s"),
+                       (auth, auth[:4], username))
 
         self.cursor_finish(cursor)
-        return self.make_result(0, auth={'auth': auth})
+
+        print("DEBUG: auth:", auth)
+        return self.make_result(0, login_token={'login_token': login_token})
 
     def check_auth(self, auth):
+        # 软性兼容。
         if len(auth) > 32:
             return self.check_token(auth)
         result = self.check_in("users", "auth", auth)
@@ -167,16 +207,51 @@ class DataBase:
             return True
         return False
 
-    # Token 格式： %auth%%utc%
-    def check_token(self, token):
-        auth = token[:32]
-        utc = int(token[32:], 16)
+    # Token 格式：salted + salt + pre_auth = (68)
+    def token_parse(self, token):
+        if len(token) != 68:
+            return '0' * 32
+        salted = token[:32]
+        salt = token[32:-4]
+        pre_auth = token[-4:]
 
-    def auth2username(self, auth):
-        if self.check_auth(auth) is False:
-            return 'No_User'
         cursor = self.cursor_get()
-        cursor.execute(self.v("SELECT username FROM users WHERE auth = %s"), (auth,))
+        cursor.execute(self.v("SELECT auth, pre_auth FROM users WHERE pre_auth = %s"), (pre_auth, ))
+        data = cursor.fetchall()
+        self.cursor_finish(cursor)
+        # 没有找到pre_auth
+        if len(data) == 0:
+            return '0' * 32
+        auth_s = data[0][0]
+        return auth_s
+
+    # Token 格式：salted + salt + pre_auth = (68)
+    def check_token(self, token):
+        if len(token) != 68:
+            return False
+        salted = token[:32]
+        salt = token[32:-4]
+        pre_auth = token[-4:]
+
+        cursor = self.cursor_get()
+        cursor.execute(self.v("SELECT auth, pre_auth FROM users WHERE pre_auth = %s"), (pre_auth, ))
+        data = cursor.fetchall()
+        self.cursor_finish(cursor)
+        # 没有找到pre_auth
+        if len(data) == 0:
+            return False
+        auth_s = data[0][0]
+        salted_s = hashlib.md5(("%s%s" % (auth_s, salt)).encode()).hexdigest()
+        if salted == salted_s:
+            return True
+        return False
+
+    def token2username(self, token):
+        if self.check_auth(token) is False:
+            return 'No_User'
+        auth = self.token_parse(token)
+        cursor = self.cursor_get()
+        cursor.execute(self.v("SELECT username FROM users WHERE auth = %s"), (auth, ))
         username = cursor.fetchall()[0][0]
         self.cursor_finish(cursor)
         return username
@@ -190,11 +265,11 @@ class DataBase:
             return True
         return False
 
-    def user_set_info(self, auth, email: str = None):
-        if self.check_auth(auth) is False:
+    def user_set_info(self, token, email: str = None):
+        if self.check_auth(token) is False:
             return self.make_result(self.errors["Auth"])
         cursor = self.cursor_get()
-        username = self.auth2username(auth)
+        username = self.token2username(token)
         if email is not None:
             cursor.execute(self.v("UPDATE users SET email = %s WHERE username = %s"), (email, username))
         self.cursor_finish(cursor)
@@ -213,10 +288,10 @@ class DataBase:
             'blog_url': data[4]
         })
 
-    def file_upload(self, auth, filename: str = 'FILE', url: str = '', filesize: int=0):
-        if self.check_auth(auth) is False:
+    def file_upload(self, token, filename: str = 'FILE', url: str = '', filesize: int=0):
+        if self.check_auth(token) is False:
             return self.make_result(self.errors["Auth"])
-        username = self.auth2username(auth)
+        username = self.token2username(token)
         cursor = self.cursor_get()
         uptime = int(time.time())
         cursor.execute(self.v("INSERT INTO files (username, filename, url, uptime, filesize) "
@@ -225,10 +300,10 @@ class DataBase:
         self.cursor_finish(cursor)
         return self.make_result(0)
 
-    def file_get(self, auth):
-        if self.check_auth(auth) is False:
+    def file_get(self, token):
+        if self.check_auth(token) is False:
             return self.make_result(self.errors["Auth"])
-        username = self.auth2username(auth)
+        username = self.token2username(token)
         cursor = self.cursor_get()
         cursor.execute(self.v("SELECT DISTINCT username, filename, url, uptime, filesize FROM files "
                               "WHERE username = %s ORDER BY filename "),
@@ -245,13 +320,45 @@ def jsonify(string: str):
     return json.loads(string)
 
 
+def decode_login_token(login_token):
+    if len(login_token) != 68:
+        return '0' * 32
+    auth_mix = login_token[:32]
+    order = login_token[32:64]
+
+    orderd = []
+    for i in range(0, len(order), 2):
+        orderd.append({'num': int(order[i:i+2], 16), 'key': i//2})
+    orderd.sort(key=lambda x: x['num'])
+    auth = ''
+    for i in orderd:
+        auth = auth + "%02x" % (0xff - int(auth_mix[i['key']*2:i['key']*2+2], 16))
+    return auth
+
+
+def make_token(auth):
+    salt = '%032x' % random.randint(0, 1 << (4 * 32))
+    salted = hashlib.md5(("%s%s" % (auth, salt)).encode()).hexdigest()
+    token = "%s%s%s" % (salted, salt, auth[:4])
+    return token
+
+
 if __name__ == '__main__':
     db = DataBase()
     db.db_init()
     db.create_user(username='Lance', password='')
     _au = db.create_auth(username='Lance', password='')
     print(_au)
-    _au = jsonify(_au)['data']['auth']['auth']
+    _au = jsonify(_au)['data']['login_token']['login_token']
+    _au = decode_login_token(_au)
+    print(_au)
+
+    _token = make_token(auth=_au)
+
+    print(db.check_auth(auth=_token))
+
+    print(db.file_get(token=_token))
+    exit(0)
 
     print(db.file_upload(_au, filename='Name', filesize=32, url='https://baidu.com/index.html'))
     print(db.file_get(_au))

@@ -5,7 +5,8 @@ CREATE TABLE users (
     created_at VARCHAR(32),
     blog_title VARCHAR(128),
     blog_url VARCHAR(512),
-    auth VARCHAR(128)
+    auth VARCHAR(128),
+    pre_auth VARCHAR(8)
 );
 
 CREATE TABLE files (
