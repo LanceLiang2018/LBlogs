@@ -8,6 +8,8 @@ import shutil
 import time
 import threading
 
+from lblogs_config import config
+
 import requests
 from flask import *
 from qcloud_cos import CosConfig
@@ -98,6 +100,23 @@ def do_upload(filename: str, username: str):
         print("Upload %s..." % filename, response)
 
 
+def do_upload_(filename: str, username: str, data: bytes):
+    if username != '':
+        key = "%s/%s" % (username, filename)
+    else:
+        key = "%s" % (filename, )
+
+    response = client.put_object(
+        Bucket=bucket,
+        Body=data,
+        Key=key,
+        # Key="%s" % (filename, ),
+        StorageClass='STANDARD',
+        EnableMD5=False
+    )
+    print("Upload %s..." % filename, response)
+
+
 @app.route('/v1/api', methods=["POST"])
 def main_api():
     form = request.form
@@ -133,7 +152,48 @@ def main_api():
         username = get_if_in('username', form)
         password = get_if_in('password', form)
         email = get_if_in('email', form, default='')
-        return db.create_user(username=username, password=password, email=email)
+        result = db.create_user(username=username, password=password, email=email)
+        res = json.loads(result)
+        if res['code'] != 0:
+            return result
+
+        try:
+            # 建立网站。
+            template = get_if_in('template', form, 'template1')
+            target = ' https://lblogs-1254016670.cos.ap-guangzhou.myqcloud.com/template/%s.zip' % template
+            tempbytes = requests.get(target).content
+            tempfile = BytesIO(tempbytes)
+            zipped = zipfile.ZipFile(tempfile)
+            if username == '':
+                pre_key = ''
+            else:
+                pre_key = '%s/' % username
+            ths = []
+            for file in zipped.namelist():
+                if not file.startswith('_site/'):
+                    continue
+                filepath = file[6:]
+                data = zipped.open(file, 'r').read()
+                t = threading.Thread(target=do_upload_, args=(filepath, username, data))
+                ths.append(t)
+
+            for t in ths:
+                t.start()
+            for t in ths:
+                t.join(20)
+            #
+            # if username == '':
+            #     name = 'Lblogs'
+            # else:
+            #     name = "%s 的博客" % username
+            # yml = config(zipped.open('_config.yml', 'r').read(), name=name)
+            # do_upload_('%s_config.yml' % pre_key, username, yml.encode())
+
+            do_upload_('%sraw.zip' % pre_key, username, tempbytes)
+
+            return db.make_result(0)
+        except Exception as e:
+            return db.make_result(1, error=str(e))
 
     if action == 'get_user':
         if 'username' not in form:
