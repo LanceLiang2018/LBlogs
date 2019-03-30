@@ -117,6 +117,66 @@ def do_upload_(filename: str, username: str, data: bytes):
     print("Upload %s..." % filename, response)
 
 
+def publish_zip(zipdata: bytes, username: str):
+    userdir = 'build_%s' % username
+    basedir = os.path.abspath('.')
+
+    z = zipfile.ZipFile(BytesIO(zipdata))
+    if os.path.exists(userdir):
+        shutil.rmtree(userdir)
+    os.mkdir(userdir)
+    z.extractall(userdir)
+    z.close()
+    os.chdir(userdir)
+    print('Doing Jekyll...')
+    result = BytesIO()
+    ths = []
+
+    if os.system("jekyll build") == 0:
+        # time.sleep(1)
+        os.chdir("_site")
+        z = zipfile.ZipFile(result, 'w')
+        # _site
+
+        for current_path, subfolders, filesname in os.walk('.'):
+            # print(current_path, subfolders, filesname)
+            #  filesname是一个列表，我们需要里面的每个文件名和当前路径组合
+            for file in filesname:
+                # 将当前路径与当前路径下的文件名组合，就是当前文件的绝对路径
+                filepath = os.path.join(current_path, file)
+                filepath = filepath.replace('\\', '/')
+                filepath = filepath.split('./')[-1]
+                z.write(filepath)
+                print("ADD file:", filepath)
+
+                t = threading.Thread(target=do_upload, args=(filepath, username))
+                ths.append(t)
+
+        # 关闭资源
+        z.close()
+    os.chdir(basedir)
+
+    for t in ths:
+        t.start()
+    for t in ths:
+        t.join()
+
+    if username != '':
+        key = "%s/%s" % (username, 'raw.zip')
+    else:
+        key = "%s" % ('raw.zip',)
+
+    response = client.put_object(
+        Bucket=bucket,
+        Body=result,
+        # Key=filename_md5,
+        Key=key,
+        StorageClass='STANDARD',
+        EnableMD5=False
+    )
+    print("Upload raw.zip...", response)
+
+
 @app.route('/v1/api', methods=["POST"])
 def main_api():
     form = request.form
